@@ -206,18 +206,17 @@ selfCollision
 }
 
 ; Whole body control
-; Feed-forward torque limits of the WBC. Keep them equal to the effective torque limits of the
-; hardware safety layer (hardware_unitree_mujoco LowLevelSafety):
-;   Go2 URDF effort limit (xacro/const.xacro *_torque_max) x torque_limit_scale (xacro/ros2_control.xacro, 0.7)
-;   hip 23.7 x 0.7 = 16.59, thigh 23.7 x 0.7 = 16.59, calf 45.43 x 0.7 = 31.80 [Nm]
-; If torque_limit_scale or const.xacro changes, update these values too.
-; (The hardware limits the total tau + kp (q_cmd - q) + kd (dq_cmd - dq); with kd > 0 the damping
-;  term comes on top of this feed-forward torque and may still be clipped by the hardware.)
+; Feed-forward torque limits of the WBC (original values).
+; Matching them to the effective torque limits of the hardware safety layer
+; (Go2 URDF effort x torque_limit_scale 0.7: hip/thigh 16.59, calf 31.80 Nm) was tried, but the
+; number of torque limit activations in the safety layer did not decrease and the calf joint
+; velocity increased (stride 0.7 m at 0.8 m/s then tripped the velocity monitor), so the original
+; values were restored. The hardware safety layer still limits the total motor torque.
 torqueLimitsTask
 {
-   (0,0)  16.59    ; HAA  (hip)
-   (1,0)  16.59    ; HFE  (thigh)
-   (2,0)  31.80    ; KFE  (calf)
+   (0,0)  23.7     ; HAA
+   (1,0)  23.7     ; HFE
+   (2,0)  35.5     ; KFE
 }
 
 frictionConeTask

@@ -135,9 +135,9 @@ ros2_control.xacro の `<hardware>` の `<param>` で設定する．書かなか
 go2_description では const.xacro にこの値があり（後脚の thigh は `rear_thigh_position_*`），
 ros2_control.xacro の安全用パラメータは `${...}` で const.xacro を参照する．
 
-OCS2 の WBC のトルク上限（`config/ocs2/task.info` の `torqueLimitsTask`）は，安全層の有効上限
-（*_torque_max × torque_limit_scale：hip/thigh 16.59，calf 31.80 Nm）と同じ値にしてある．
-torque_limit_scale や const.xacro を変えたら task.info も手で合わせること．
+OCS2 の WBC のトルク上限（`config/ocs2/task.info` の `torqueLimitsTask`）は元の値（23.7 / 23.7 / 35.5 Nm）のまま．
+安全層の有効上限（hip/thigh 16.59，calf 31.80 Nm）に合わせる案を試したが，トルク制限の回数は減らず，
+calf の角速度が増えた（0.8 m/s・歩幅 0.7 m で角速度の監視により停止）ため元に戻した．
 
 `<name>` は 4 本の脚すべてに設定し，`front_<name>`（FR, FL）と `rear_<name>`（RR, RL）で上書きできる
 （例：`rear_thigh_position_min`）．関節の上限のパラメータ（*_torque_max，*_velocity_max，*_position_min/max）すべてで使える．
