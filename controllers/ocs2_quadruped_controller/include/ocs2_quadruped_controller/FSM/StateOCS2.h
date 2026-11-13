@@ -38,6 +38,14 @@ namespace ocs2::legged_robot
 
         FSMStateName checkChange() override;
 
+        /// True once after checkChange() returned PASSIVE because the SafetyChecker failed.
+        bool takeSafetyFailure()
+        {
+            const bool failed = safety_failed_;
+            safety_failed_ = false;
+            return failed;
+        }
+
     private:
         /// Command written while no MPC policy is available.
         void writeHoldCommand() const;
@@ -54,6 +62,7 @@ namespace ocs2::legged_robot
         double default_kd_ = 6;
 
         vector_t optimized_state_, optimized_input_;
+        bool safety_failed_ = false;
     };
 }
 

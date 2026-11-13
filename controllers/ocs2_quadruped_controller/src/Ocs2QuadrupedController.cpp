@@ -97,10 +97,35 @@ namespace ocs2::legged_robot
             mode_ = FSMMode::CHANGE;
         }
 
+        // SafetyChecker latch: released by command 1
+        if (safety_latched_ && ctrl_interfaces_.control_inputs_.command == 1)
+        {
+            setSafetyLatched(false);
+        }
+
         if (mode_ == FSMMode::NORMAL)
         {
             current_state_->run(time, period);
             next_state_name_ = hardware_stopped ? current_state_->state_name : current_state_->checkChange();
+            if (current_state_ == state_list_.fixedDown && state_list_.fixedDown->takeSafetyFailure())
+            {
+                setSafetyLatched(true);
+            }
+            if (safety_latched_ && current_state_ == state_list_.passive &&
+                next_state_name_ == FSMStateName::FIXEDDOWN)
+            {
+                if (!latched_command_reported_)
+                {
+                    latched_command_reported_ = true;
+                    RCLCPP_WARN(get_node()->get_logger(),
+                                "SafetyChecker stop is latched: ignoring command 2 (OCS2). Send command 1 to release.");
+                }
+                next_state_name_ = FSMStateName::PASSIVE;
+            }
+            else if (ctrl_interfaces_.control_inputs_.command != 2)
+            {
+                latched_command_reported_ = false; // report again on the next press
+            }
             if (next_state_name_ != current_state_->state_name)
             {
                 mode_ = FSMMode::CHANGE;
@@ -119,6 +144,28 @@ namespace ocs2::legged_robot
         }
 
         return controller_interface::return_type::OK;
+    }
+
+    void Ocs2QuadrupedController::setSafetyLatched(const bool latched)
+    {
+        if (latched == safety_latched_) return;
+        safety_latched_ = latched;
+        latched_command_reported_ = false;
+        if (latched)
+        {
+            RCLCPP_ERROR(get_node()->get_logger(),
+                         "SafetyChecker stop LATCHED: staying in passive, command 2 is ignored until command 1.");
+        }
+        else
+        {
+            RCLCPP_INFO(get_node()->get_logger(), "SafetyChecker stop latch released by command 1.");
+        }
+        if (safety_latched_publisher_)
+        {
+            std_msgs::msg::Bool msg;
+            msg.data = latched;
+            safety_latched_publisher_->publish(msg); // only on change
+        }
     }
 
     controller_interface::CallbackReturn Ocs2QuadrupedController::on_init()
@@ -165,6 +212,14 @@ namespace ocs2::legged_robot
     controller_interface::CallbackReturn Ocs2QuadrupedController::on_configure(
         const rclcpp_lifecycle::State& /*previous_state*/)
     {
+        safety_latched_publisher_ = get_node()->create_publisher<std_msgs::msg::Bool>(
+            "~/safety_latched", rclcpp::QoS(1).transient_local());
+        {
+            std_msgs::msg::Bool msg;
+            msg.data = safety_latched_;
+            safety_latched_publisher_->publish(msg);
+        }
+
         control_input_subscription_ = get_node()->create_subscription<control_input_msgs::msg::Inputs>(
             "/control_input", 10, [this](const control_input_msgs::msg::Inputs::SharedPtr msg)
             {

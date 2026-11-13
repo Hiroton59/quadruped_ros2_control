@@ -8,6 +8,7 @@
 #include <controller_common/FSM/StatePassive.h>
 #include <controller_interface/controller_interface.hpp>
 #include <control_input_msgs/msg/inputs.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <ocs2_quadruped_controller/FSM/StateOCS2.h>
 #include <ocs2_quadruped_controller/control/CtrlComponent.h>
 
@@ -105,6 +106,13 @@ namespace ocs2::legged_robot {
         std::string hardware_safety_interface_;
         const hardware_interface::LoanedStateInterface* hardware_safety_stop_ = nullptr;
         bool hardware_stop_reported_ = false;
+
+        // SafetyChecker stop latch: after the SafetyChecker sent the FSM to PASSIVE, command 2
+        // (enter OCS2) is ignored until command 1 is received once. Published on ~/safety_latched.
+        void setSafetyLatched(bool latched);
+        bool safety_latched_ = false;
+        bool latched_command_reported_ = false;
+        rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr safety_latched_publisher_;
 
         rclcpp::Subscription<control_input_msgs::msg::Inputs>::SharedPtr control_input_subscription_;
     };

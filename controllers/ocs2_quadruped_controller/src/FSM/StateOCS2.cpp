@@ -145,6 +145,7 @@ namespace ocs2::legged_robot
         {
             RCLCPP_ERROR(node_->get_logger(),
                          "[Legged Controller] Safety check failed, stopping the controller.");
+            safety_failed_ = true;
             return FSMStateName::PASSIVE;
         }
         switch (ctrl_interfaces_.control_inputs_.command)
