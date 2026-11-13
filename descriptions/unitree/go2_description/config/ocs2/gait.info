@@ -12,6 +12,10 @@ list
   [9] lindyhop
   [10] skipping
   [11] pawup
+  [12] trot_T040
+  [13] trot_T050
+  [14] trot_T070
+  [15] trot_T080
 }
 
 stance
@@ -251,5 +255,65 @@ pawup
    {
      [0]     0.0
      [1]     2.0
+   }
+}
+
+trot_T040
+ {
+   modeSequence
+   {
+     [0]     LF_RH
+     [1]     RF_LH
+   }
+   switchingTimes
+   {
+     [0]     0.0
+     [1]     0.20
+     [2]     0.40
+   }
+}
+
+trot_T050
+ {
+   modeSequence
+   {
+     [0]     LF_RH
+     [1]     RF_LH
+   }
+   switchingTimes
+   {
+     [0]     0.0
+     [1]     0.25
+     [2]     0.50
+   }
+}
+
+trot_T070
+ {
+   modeSequence
+   {
+     [0]     LF_RH
+     [1]     RF_LH
+   }
+   switchingTimes
+   {
+     [0]     0.0
+     [1]     0.35
+     [2]     0.70
+   }
+}
+
+trot_T080
+ {
+   modeSequence
+   {
+     [0]     LF_RH
+     [1]     RF_LH
+   }
+   switchingTimes
+   {
+     [0]     0.0
+     [1]     0.40
+     [2]     0.80
    }
 }

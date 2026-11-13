@@ -18,6 +18,7 @@
   <depend>ocs2_self_collision</depend>
   <depend>ocs2_legged_robot_ros</depend>
   <depend>angles</depend>
+  <depend>std_msgs</depend>
 
   <!--/ Dependencies for Perceptive Mode -->
   <depend>convex_plane_decomposition_msgs</depend>

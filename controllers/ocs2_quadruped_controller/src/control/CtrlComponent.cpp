@@ -186,7 +186,8 @@ namespace ocs2::legged_robot
         const auto gait_manager_ptr = std::make_shared<GaitManager>(
             ctrl_interfaces_,
             legged_interface_->getSwitchedModelReferenceManagerPtr()->
-                               getGaitSchedule());
+                               getGaitSchedule(),
+            node_);
         gait_manager_ptr->init(gait_file_);
         mpc_->getSolverPtr()->addSynchronizedModule(gait_manager_ptr);
         mpc_->getSolverPtr()->setReferenceManager(legged_interface_->getReferenceManagerPtr());

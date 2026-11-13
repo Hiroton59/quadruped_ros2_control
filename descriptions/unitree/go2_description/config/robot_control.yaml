@@ -146,6 +146,16 @@ ocs2_quadruped_controller:
       - RL
       - FR
       - RR
+      
+    estimator_type: "ground_truth"
+    odom_name: "odometer"
+    odom_interfaces:
+      - position.x
+      - position.y
+      - position.z
+      - velocity.x
+      - velocity.y
+      - velocity.z
 
 rl_quadruped_controller:
   ros__parameters:

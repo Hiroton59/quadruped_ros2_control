@@ -12,11 +12,28 @@
 namespace ocs2::legged_robot
 {
     GaitManager::GaitManager(CtrlInterfaces& ctrl_interfaces,
-                             std::shared_ptr<GaitSchedule> gait_schedule_ptr)
+                             std::shared_ptr<GaitSchedule> gait_schedule_ptr,
+                             rclcpp_lifecycle::LifecycleNode::SharedPtr node)
         : ctrl_interfaces_(ctrl_interfaces),
           gait_schedule_ptr_(std::move(gait_schedule_ptr)),
+          node_(std::move(node)),
           target_gait_({0.0, 1.0}, {STANCE})
     {
+        // 歩行周期 [s]．stance 以外の gait をこの周期に伸縮する（0 以下で gait.info のまま）
+        period_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
+            "/gait_period", rclcpp::QoS(1).reliable().transient_local(),
+            [this](const std_msgs::msg::Float64::SharedPtr msg)
+            {
+                if (msg->data > 0.0 && (msg->data < 0.2 || msg->data > 1.5))
+                {
+                    RCLCPP_WARN(rclcpp::get_logger("GaitManager"),
+                                "gait period %.3f s is out of range [0.2, 1.5], ignored", msg->data);
+                    return;
+                }
+                gait_period_ = msg->data;
+                period_updated_ = true;
+                RCLCPP_INFO(rclcpp::get_logger("GaitManager"), "Gait period set to %.3f s", msg->data);
+            });
     }
 
     void GaitManager::preSolverRun(const scalar_t initTime, const scalar_t finalTime,
@@ -47,15 +64,42 @@ namespace ocs2::legged_robot
         RCLCPP_INFO(rclcpp::get_logger("gait_manager"), "GaitManager is ready.");
     }
 
+    ModeSequenceTemplate GaitManager::scaledGait(const size_t index) const
+    {
+        ModeSequenceTemplate gait = gait_list_[index];
+        const double period = gait_period_;
+        if (period <= 0.0 || gait_name_list_[index] == "stance") return gait;
+
+        const double scale = period / gait.switchingTimes.back();
+        for (auto& t : gait.switchingTimes) t *= scale;
+        return gait;
+    }
+
     void GaitManager::getTargetGait()
     {
-        if (ctrl_interfaces_.control_inputs_.command == 0) return;
-        if (ctrl_interfaces_.control_inputs_.command == last_command_) return;
-        last_command_ = ctrl_interfaces_.control_inputs_.command;
-        const int command = std::max(0, ctrl_interfaces_.control_inputs_.command - 2);
-        target_gait_ = gait_list_[command];
-        RCLCPP_INFO(rclcpp::get_logger("GaitManager"), "Switch to gait: %s",
-                    gait_name_list_[command].c_str());
+        bool changed = false;
+
+        const int command = ctrl_interfaces_.control_inputs_.command;
+        if (command != 0 && command != last_command_)
+        {
+            last_command_ = command;
+            const size_t index = std::max(0, command - 2);
+            if (index < gait_list_.size())
+            {
+                current_gait_index_ = index;
+                changed = true;
+            }
+            else
+            {
+                RCLCPP_WARN(rclcpp::get_logger("GaitManager"), "No gait for command %d", command);
+            }
+        }
+        if (period_updated_.exchange(false)) changed = true;
+        if (!changed) return;
+
+        target_gait_ = scaledGait(current_gait_index_);
+        RCLCPP_INFO(rclcpp::get_logger("GaitManager"), "Switch to gait: %s (period %.3f s)",
+                    gait_name_list_[current_gait_index_].c_str(), target_gait_.switchingTimes.back());
         gait_updated_ = true;
     }
 }

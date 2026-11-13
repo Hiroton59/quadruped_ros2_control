@@ -19,6 +19,7 @@ set(CONTROLLER_INCLUDE_DEPENDS
         control_input_msgs
         angles
         nav_msgs
+        std_msgs
         qpoases_colcon
         ament_index_cpp
 
@@ -33,6 +34,7 @@ find_package(ament_cmake REQUIRED)
 foreach (Dependency IN ITEMS ${CONTROLLER_INCLUDE_DEPENDS})
     find_package(${Dependency} REQUIRED)
 endforeach ()
+find_package(PCL REQUIRED COMPONENTS common)
 
 add_library(${PROJECT_NAME} SHARED
         src/Ocs2QuadrupedController.cpp
@@ -74,6 +76,7 @@ add_library(${PROJECT_NAME} SHARED
         src/perceptive/visualize/SphereVisualization.cpp
         src/perceptive/synchronize/PlanarTerrainReceiver.cpp
 )
+target_include_directories(${PROJECT_NAME} PUBLIC ${PCL_INCLUDE_DIRS})
 target_include_directories(${PROJECT_NAME}
         PUBLIC
         ${qpOASES_INCLUDE_DIR}
