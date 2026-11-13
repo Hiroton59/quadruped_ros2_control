@@ -132,8 +132,12 @@ ros2_control.xacro の `<hardware>` の `<param>` で設定する．書かなか
 
 関節の上限は Unitree 公式の Go2 URDF（unitreerobotics/unitree_ros の
 `robots/go2_description/urdf/go2_description.urdf`．unitree_mujoco の `go2.xml` と同じ値）による．
-go2_description の const.xacro（URDF の limit）は calf 35.55 Nm，20.06 rad/s で Go1 と同じ値になっており，
-後脚の thigh の可動域も区別していないので，安全用のパラメータには使っていない．
+go2_description では const.xacro にこの値があり（後脚の thigh は `rear_thigh_position_*`），
+ros2_control.xacro の安全用パラメータは `${...}` で const.xacro を参照する．
+
+OCS2 の WBC のトルク上限（`config/ocs2/task.info` の `torqueLimitsTask`）は，安全層の有効上限
+（*_torque_max × torque_limit_scale：hip/thigh 16.59，calf 31.80 Nm）と同じ値にしてある．
+torque_limit_scale や const.xacro を変えたら task.info も手で合わせること．
 
 `<name>` は 4 本の脚すべてに設定し，`front_<name>`（FR, FL）と `rear_<name>`（RR, RL）で上書きできる
 （例：`rear_thigh_position_min`）．関節の上限のパラメータ（*_torque_max，*_velocity_max，*_position_min/max）すべてで使える．
