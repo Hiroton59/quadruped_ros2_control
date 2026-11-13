@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 
 namespace hardware_unitree_mujoco
 {
@@ -122,7 +123,8 @@ namespace hardware_unitree_mujoco
         bool enabled = true;
 
         // Joint limits, joint order FR, FL, RR, RL x (hip, thigh, calf) = Unitree motor order.
-        // Defaults: go2_description/xacro/const.xacro.
+        // Defaults: official Unitree Go2 URDF (unitree_ros robots/go2_description, same as
+        // unitree_mujoco unitree_robots/go2/go2.xml). The rear thigh range differs from the front.
         JointArray torque_max{}; ///< [Nm] rated limit before scaling
         JointArray q_min{}, q_max{}; ///< [rad]
         JointArray dq_max{}; ///< [rad/s]
@@ -139,11 +141,14 @@ namespace hardware_unitree_mujoco
         double dq_ratio = 0.8; ///< of dq_max
 
         double temperature_warn = 70.0; ///< [deg C] (MotorState_.temperature)
-        double temperature_stop = 85.0; ///< [deg C]
+        /// [deg C] Disabled (infinity) by default until the Unitree motor spec is confirmed.
+        double temperature_stop = std::numeric_limits<double>::infinity();
 
         double command_timeout = 0.02; ///< [s] watchdog
         double state_timeout = 0.05; ///< [s] LowState not received
         double loop_stall_timeout = 0.1; ///< [s] write() not called (checked by HardwareUnitree's thread)
+        /// Consecutive LowState messages with a CRC mismatch that cause a stop (0 disables the stop).
+        unsigned lowstate_crc_max_failures = 10;
 
         std::uint16_t estop_buttons = remote::L2 | remote::B; ///< 0 disables the remote e-stop
 
@@ -153,18 +158,19 @@ namespace hardware_unitree_mujoco
             for (std::size_t leg = 0; leg < 4; ++leg)
             {
                 const std::size_t h = leg * 3, t = h + 1, c = h + 2;
+                const bool rear = leg >= 2; // FR, FL, RR, RL
                 p.torque_max[h] = 23.7;
                 p.torque_max[t] = 23.7;
-                p.torque_max[c] = 35.55;
+                p.torque_max[c] = 45.43;
                 p.q_min[h] = -1.0472;
                 p.q_max[h] = 1.0472;
-                p.q_min[t] = -1.5708;
-                p.q_max[t] = 3.4907;
+                p.q_min[t] = rear ? -0.5236 : -1.5708;
+                p.q_max[t] = rear ? 4.5379 : 3.4907;
                 p.q_min[c] = -2.7227;
                 p.q_max[c] = -0.83776;
                 p.dq_max[h] = 30.1;
                 p.dq_max[t] = 30.1;
-                p.dq_max[c] = 20.06;
+                p.dq_max[c] = 15.70;
             }
             return p;
         }
@@ -195,6 +201,7 @@ namespace hardware_unitree_mujoco
         STATE_TIMEOUT = 8,
         REMOTE_ESTOP = 9,
         LOOP_STALL = 10, ///< write() not called (detected by the hardware's monitor thread)
+        LOWSTATE_CRC = 11, ///< consecutive LowState CRC mismatches
     };
 
     inline const char* toString(const StopReason r)
@@ -212,6 +219,7 @@ namespace hardware_unitree_mujoco
         case StopReason::STATE_TIMEOUT: return "LowState timeout";
         case StopReason::REMOTE_ESTOP: return "remote controller e-stop";
         case StopReason::LOOP_STALL: return "control loop stall (write() not called)";
+        case StopReason::LOWSTATE_CRC: return "consecutive LowState CRC mismatches";
         }
         return "unknown";
     }
@@ -257,6 +265,7 @@ namespace hardware_unitree_mujoco
             temp_warned_.fill(false);
             temp_warn_reported_.fill(false);
             torque_clamp_count_ = 0;
+            joint_clamp_count_.fill(0);
             state_ = JointStateSample{};
         }
 
@@ -398,12 +407,24 @@ namespace hardware_unitree_mujoco
                 {
                     cmd.tau[i] = lim - pd;
                     ++torque_clamp_count_;
+                    ++joint_clamp_count_[i];
                 }
                 else if (total < -lim)
                 {
                     cmd.tau[i] = -lim - pd;
                     ++torque_clamp_count_;
+                    ++joint_clamp_count_[i];
                 }
+            }
+        }
+
+        /// Number of consecutive LowState messages dropped for a CRC mismatch (0 after a good one).
+        void updateCrcFailures(const unsigned consecutive, const double now)
+        {
+            if (!p_.enabled || p_.lowstate_crc_max_failures == 0) return;
+            if (consecutive >= p_.lowstate_crc_max_failures)
+            {
+                trip(StopReason::LOWSTATE_CRC, -1, consecutive, p_.lowstate_crc_max_failures, now);
             }
         }
 
@@ -435,6 +456,8 @@ namespace hardware_unitree_mujoco
         [[nodiscard]] const SafetyParams& params() const { return p_; }
         [[nodiscard]] double torqueLimit(const std::size_t i) const { return torque_limit_[i]; }
         [[nodiscard]] std::uint64_t torqueClampCount() const { return torque_clamp_count_; }
+        /// Cycles in which the total torque limit changed tau, per joint (cumulative).
+        [[nodiscard]] std::uint64_t torqueClampCount(const std::size_t i) const { return joint_clamp_count_[i]; }
 
         /// True exactly once after a stop, so the caller can log the reason once.
         bool takeStopEvent()
@@ -518,6 +541,7 @@ namespace hardware_unitree_mujoco
         std::array<bool, kNumJoints> temp_warned_{};
         std::array<bool, kNumJoints> temp_warn_reported_{};
         std::uint64_t torque_clamp_count_ = 0;
+        std::array<std::uint64_t, kNumJoints> joint_clamp_count_{};
     };
 } // namespace hardware_unitree_mujoco
 

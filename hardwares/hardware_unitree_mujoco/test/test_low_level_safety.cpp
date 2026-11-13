@@ -164,7 +164,7 @@ TEST_F(Fixture, TotalTorqueIsLimitedByReducingTau)
     EXPECT_FALSE(safety.stopped());
 
     const double lim_thigh = 23.7 * 0.7;
-    const double lim_calf = 35.55 * 0.7;
+    const double lim_calf = 45.43 * 0.7;
     EXPECT_NEAR(safety.totalTorque(out, 1), lim_thigh, 1e-9);
     EXPECT_DOUBLE_EQ(out.kp[1], 50.0); // gains and q_cmd untouched
     EXPECT_DOUBLE_EQ(out.q[1], s.q[1] + 0.3);
@@ -181,7 +181,7 @@ TEST_F(Fixture, TotalTorqueIncludesDamping)
     c.kd[5] = 4.0; // kd * (0 - (-10)) = 40 Nm
     c.tau[5] = 0.0;
     const JointCommand out = step(s, c);
-    EXPECT_NEAR(safety.totalTorque(out, 5), 35.55 * 0.7, 1e-9);
+    EXPECT_NEAR(safety.totalTorque(out, 5), 45.43 * 0.7, 1e-9);
     EXPECT_LT(out.tau[5], 0.0);
 }
 
@@ -206,7 +206,7 @@ TEST_F(Fixture, GainsAndPositionCommandAreClamped)
 TEST_F(Fixture, SustainedTauEstStops)
 {
     auto s = nominalState();
-    s.tau_est[8] = 0.95 * 35.55 * 0.7; // calf, above 90 % of the limit
+    s.tau_est[8] = 0.95 * 45.43 * 0.7; // calf, above 90 % of the limit
     const double t0 = t;
     while (!safety.stopped() && t - t0 < 1.0)
     {
@@ -251,26 +251,95 @@ TEST_F(Fixture, SmallRangeExcessWithinToleranceIsOk)
 TEST_F(Fixture, JointVelocityStops)
 {
     auto s = nominalState();
-    s.dq[11] = 0.81 * 20.06;
+    s.dq[11] = 0.81 * 15.70;
     step(s, nominalCommand());
     EXPECT_EQ(safety.stopInfo().reason, StopReason::JOINT_VELOCITY);
     EXPECT_EQ(safety.stopInfo().joint, 11);
 }
 
-TEST_F(Fixture, TemperatureWarnThenStop)
+TEST_F(Fixture, TemperatureOnlyWarnsByDefault)
 {
+    EXPECT_TRUE(std::isinf(safety.params().temperature_stop));
     auto s = nominalState();
-    s.temperature[3] = safety.params().temperature_warn;
+    s.temperature[3] = 120.0;
     step(s, nominalCommand());
     EXPECT_FALSE(safety.stopped());
     EXPECT_EQ(safety.takeTemperatureWarning(), 3);
+}
+
+TEST(Temperature, WarnThenStopWhenEnabled)
+{
+    auto p = SafetyParams::go2Defaults();
+    p.temperature_stop = 85.0;
+    LowLevelSafety safety(p);
+    double t = 0.0;
+    auto s = nominalState();
+    JointCommand c = nominalCommand();
+    safety.updateState(s, t, t);
+    safety.filterCommand(c, true, t);
+
+    s.temperature[3] = p.temperature_warn;
+    safety.updateState(s, t, t);
+    EXPECT_FALSE(safety.stopped());
+    EXPECT_EQ(safety.takeTemperatureWarning(), 3);
     EXPECT_EQ(safety.takeTemperatureWarning(), -1); // only once
-    step(s, nominalCommand());
+    safety.updateState(s, t, t);
     EXPECT_EQ(safety.takeTemperatureWarning(), -1);
 
-    s.temperature[3] = safety.params().temperature_stop;
-    step(s, nominalCommand());
+    s.temperature[3] = 85.0;
+    safety.updateState(s, t, t);
     EXPECT_EQ(safety.stopInfo().reason, StopReason::MOTOR_TEMPERATURE);
+}
+
+TEST(Defaults, Go2OfficialLimits)
+{
+    const auto p = SafetyParams::go2Defaults();
+    EXPECT_DOUBLE_EQ(p.torque_max[2], 45.43);
+    EXPECT_DOUBLE_EQ(p.dq_max[2], 15.70);
+    // front thigh (FR = 1, FL = 4) vs rear thigh (RR = 7, RL = 10)
+    for (const std::size_t i : {1u, 4u})
+    {
+        EXPECT_DOUBLE_EQ(p.q_min[i], -1.5708);
+        EXPECT_DOUBLE_EQ(p.q_max[i], 3.4907);
+    }
+    for (const std::size_t i : {7u, 10u})
+    {
+        EXPECT_DOUBLE_EQ(p.q_min[i], -0.5236);
+        EXPECT_DOUBLE_EQ(p.q_max[i], 4.5379);
+    }
+}
+
+TEST_F(Fixture, RearThighRangeIsPerLeg)
+{
+    // -0.8 rad is inside the front thigh range but below the rear one (-0.5236 - 0.05)
+    auto s = nominalState();
+    s.q[1] = -0.8; // FR thigh: ok
+    step(s, nominalCommand());
+    EXPECT_FALSE(safety.stopped());
+    s.q[7] = -0.8; // RR thigh: out of range
+    step(s, nominalCommand());
+    EXPECT_EQ(safety.stopInfo().reason, StopReason::JOINT_OUT_OF_RANGE);
+    EXPECT_EQ(safety.stopInfo().joint, 7);
+}
+
+TEST_F(Fixture, TorqueClampCountPerJoint)
+{
+    JointCommand c = nominalCommand();
+    c.tau[2] = 100.0;
+    for (int i = 0; i < 3; ++i) step(nominalState(), c);
+    EXPECT_EQ(safety.torqueClampCount(2), 3u);
+    EXPECT_EQ(safety.torqueClampCount(0), 0u);
+    EXPECT_EQ(safety.torqueClampCount(), 3u);
+}
+
+TEST_F(Fixture, LowStateCrcFailures)
+{
+    const unsigned n = safety.params().lowstate_crc_max_failures;
+    safety.updateCrcFailures(n - 1, t);
+    EXPECT_FALSE(safety.stopped());
+    safety.updateCrcFailures(0, t); // a good message resets the count (done by the caller)
+    safety.updateCrcFailures(n, t);
+    EXPECT_EQ(safety.stopInfo().reason, StopReason::LOWSTATE_CRC);
 }
 
 TEST_F(Fixture, CommandWatchdog)

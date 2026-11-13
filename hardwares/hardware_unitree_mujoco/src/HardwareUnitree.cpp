@@ -162,6 +162,14 @@ std::vector<hardware_interface::StateInterface> HardwareUnitree::export_state_in
     // low-level safety state (also published by joint_state_broadcaster on /dynamic_joint_states)
     state_interfaces.emplace_back("safety", "stop", &safety_stop_state_);
     state_interfaces.emplace_back("safety", "reason", &safety_reason_state_);
+    state_interfaces.emplace_back("safety", "lowstate_crc_errors", &lowstate_crc_errors_state_);
+    // cumulative number of cycles in which the total torque limit changed tau, per joint
+    for (size_t i = 0; i < kNumJoints; ++i)
+    {
+        state_interfaces.emplace_back(
+            "safety", std::string("torque_limit_count_") + hardware_unitree_mujoco::LowLevelSafety::jointName(
+                static_cast<int>(i)), &torque_limit_count_state_[i]);
+    }
 
     // export imu sensor state interface
     for (uint i = 0; i < info_.sensors[0].state_interfaces.size(); i++)
@@ -227,8 +235,11 @@ return_type HardwareUnitree::read(const rclcpp::Time& /*time*/, const rclcpp::Du
 {
     bool new_sample = false;
     double sample_time = 0.0;
+    unsigned crc_consecutive = 0;
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
+        crc_consecutive = low_state_crc_consecutive_;
+        lowstate_crc_errors_state_ = static_cast<double>(low_state_crc_total_);
         if (low_state_rx_seq_ != low_state_read_seq_)
         {
             low_state_ = low_state_rx_;
@@ -253,6 +264,7 @@ return_type HardwareUnitree::read(const rclcpp::Time& /*time*/, const rclcpp::Du
         sample.remote_buttons = hardware_unitree_mujoco::remote::buttons(low_state_.wireless_remote().data());
         safety_.updateState(sample, sample_time, steadyNow());
     }
+    safety_.updateCrcFailures(crc_consecutive, steadyNow());
 
     // joint states
     for (int i(0); i < 12; ++i)
@@ -326,6 +338,10 @@ return_type HardwareUnitree::write(const rclcpp::Time& /*time*/, const rclcpp::D
     }
     safety_stop_state_ = safety_.stopped() ? 1.0 : 0.0;
     safety_reason_state_ = static_cast<double>(safety_.stopInfo().reason);
+    for (size_t i = 0; i < kNumJoints; ++i)
+    {
+        torque_limit_count_state_[i] = static_cast<double>(safety_.torqueClampCount(i));
+    }
     reportSafetyEvents();
     return return_type::OK;
 }
@@ -453,8 +469,21 @@ void HardwareUnitree::lowStateMessageHandle(const void* messages)
 {
     // DDS receive thread
     const double now = steadyNow();
+    const auto* msg = static_cast<const unitree_go::msg::dds_::LowState_*>(messages);
+    // Same CRC as the sender (unitree_sdk2 dds_wrapper go2_pub.h, and LowCmd in write()):
+    // crc32 over the message words except the trailing crc field.
+    const bool crc_ok = !lowstate_crc_check_ ||
+        crc32_core(reinterpret_cast<const uint32_t*>(msg), (sizeof(unitree_go::msg::dds_::LowState_) >> 2) - 1) ==
+        msg->crc();
     std::lock_guard<std::mutex> lock(state_mutex_);
-    low_state_rx_ = *static_cast<const unitree_go::msg::dds_::LowState_*>(messages);
+    if (!crc_ok)
+    {
+        ++low_state_crc_consecutive_;
+        ++low_state_crc_total_;
+        return; // not used
+    }
+    low_state_crc_consecutive_ = 0;
+    low_state_rx_ = *msg;
     low_state_rx_time_ = now;
     ++low_state_rx_seq_;
 }
@@ -516,12 +545,26 @@ bool HardwareUnitree::loadSafetyParams(const hardware_interface::HardwareInfo& i
             }
         }
     };
-    // Same value for every leg: index 0 = hip, 1 = thigh, 2 = calf.
+    // Index 0 = hip, 1 = thigh, 2 = calf. "<name>" sets every leg, then "front_<name>" (FR, FL)
+    // and "rear_<name>" (RR, RL) override it, e.g. rear_thigh_position_min.
     auto get_per_joint = [&](const char* name, hardware_unitree_mujoco::JointArray& array, size_t offset)
     {
-        double v = array[offset];
+        const std::string n(name);
+        for (const auto& [prefix, first_leg] : {std::pair<std::string, size_t>{"", 0}, {"front_", 0}, {"rear_", 2}})
+        {
+            if (hw.find(prefix + n) == hw.end()) continue;
+            double v = 0.0;
+            get_double((prefix + n).c_str(), v);
+            const size_t last_leg = prefix.empty() ? 4 : first_leg + 2;
+            for (size_t leg = first_leg; leg < last_leg; ++leg) array[leg * 3 + offset] = v;
+        }
+    };
+    auto get_unsigned = [&](const char* name, unsigned& value)
+    {
+        double v = value;
         get_double(name, v);
-        for (size_t leg = 0; leg < 4; ++leg) array[leg * 3 + offset] = v;
+        if (v < 0.0 || v != static_cast<double>(static_cast<unsigned>(v))) bad += std::string(" ") + name;
+        else value = static_cast<unsigned>(v);
     };
 
     if (const auto it = hw.find("safety_enabled"); it != hw.end())
@@ -550,9 +593,18 @@ bool HardwareUnitree::loadSafetyParams(const hardware_interface::HardwareInfo& i
     get_double("tau_est_duration", p.tau_est_duration);
     get_double("velocity_ratio", p.dq_ratio);
     get_double("temperature_warn", p.temperature_warn);
-    get_double("temperature_stop", p.temperature_stop);
+    // "none" (default) disables the temperature stop
+    if (const auto it = hw.find("temperature_stop"); it != hw.end() && it->second != "none")
+    {
+        get_double("temperature_stop", p.temperature_stop);
+    }
     get_double("command_timeout", p.command_timeout);
     get_double("lowstate_timeout", p.state_timeout);
+    get_unsigned("lowstate_crc_max_failures", p.lowstate_crc_max_failures);
+    if (const auto it = hw.find("lowstate_crc_check"); it != hw.end())
+    {
+        lowstate_crc_check_ = it->second != "false" && it->second != "0";
+    }
     get_double("loop_stall_timeout", p.loop_stall_timeout);
 
     // estop_buttons: button names joined by '+', e.g. "L2+B"; "none" disables.
@@ -614,11 +666,23 @@ bool HardwareUnitree::loadSafetyParams(const hardware_interface::HardwareInfo& i
                 "[LowLevelSafety] torque limit (scale %.2f) hip %.2f thigh %.2f calf %.2f Nm | kp<=%.1f kd<=%.1f "
                 "| q_cmd margin %.3f rad, q tolerance %.3f rad | dq <= %.0f%% | tau_est > %.0f%% for %.3f s "
                 "| temp warn %.0f stop %.0f | cmd timeout %.3f s, lowstate timeout %.3f s, loop stall %.3f s "
-                "| estop mask 0x%04x | damping kd %.2f",
+                "| estop mask 0x%04x | damping kd %.2f | LowState CRC check %s (stop after %u)",
                 p.torque_limit_scale, safety_.torqueLimit(0), safety_.torqueLimit(1), safety_.torqueLimit(2),
                 p.kp_max, p.kd_max, p.q_cmd_margin, p.q_monitor_tolerance, p.dq_ratio * 100.0,
                 p.tau_est_ratio * 100.0, p.tau_est_duration, p.temperature_warn, p.temperature_stop,
-                p.command_timeout, p.state_timeout, p.loop_stall_timeout, p.estop_buttons, p.damping_kd);
+                p.command_timeout, p.state_timeout, p.loop_stall_timeout, p.estop_buttons, p.damping_kd,
+                lowstate_crc_check_ ? "on" : "OFF", p.lowstate_crc_max_failures);
+    for (size_t leg = 0; leg < 4; ++leg)
+    {
+        const size_t h = leg * 3;
+        RCLCPP_INFO(kLogger,
+                    "[LowLevelSafety] %.2s: q hip [%.4f, %.4f] thigh [%.4f, %.4f] calf [%.4f, %.4f] rad | "
+                    "tau %.2f/%.2f/%.2f Nm | dq max %.2f/%.2f/%.2f rad/s",
+                    hardware_unitree_mujoco::LowLevelSafety::jointName(static_cast<int>(h)),
+                    p.q_min[h], p.q_max[h], p.q_min[h + 1], p.q_max[h + 1], p.q_min[h + 2], p.q_max[h + 2],
+                    safety_.torqueLimit(h), safety_.torqueLimit(h + 1), safety_.torqueLimit(h + 2),
+                    p.dq_max[h], p.dq_max[h + 1], p.dq_max[h + 2]);
+    }
     return true;
 }
 

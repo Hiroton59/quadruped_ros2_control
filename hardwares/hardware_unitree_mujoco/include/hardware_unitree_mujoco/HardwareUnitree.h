@@ -105,11 +105,16 @@ protected:
     std::uint64_t low_state_rx_seq_ = 0; // guarded by state_mutex_
     double low_state_rx_time_ = 0.0; // [s] steady clock, guarded by state_mutex_
     std::uint64_t low_state_read_seq_ = 0; // control thread only
+    bool lowstate_crc_check_ = true; // set in on_init only
+    unsigned low_state_crc_consecutive_ = 0; // guarded by state_mutex_
+    std::uint64_t low_state_crc_total_ = 0; // guarded by state_mutex_
 
     // Low-level safety
     hardware_unitree_mujoco::LowLevelSafety safety_;
     double safety_stop_state_ = 0.0; // state interface safety/stop (1 = latched damping)
     double safety_reason_state_ = 0.0; // state interface safety/reason (StopReason code)
+    double lowstate_crc_errors_state_ = 0.0; // safety/lowstate_crc_errors (cumulative)
+    hardware_unitree_mujoco::JointArray torque_limit_count_state_{}; // safety/torque_limit_count_<joint>
     std::uint64_t last_clamp_count_ = 0;
     double last_clamp_report_time_ = 0.0;
 
