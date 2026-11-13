@@ -70,6 +70,11 @@ if (BUILD_TESTING)
     # a copyright and license is added to all source files
     set(ament_cmake_cpplint_FOUND TRUE)
     ament_lint_auto_find_test_dependencies()
+
+    find_package(ament_cmake_gtest REQUIRED)
+    ament_add_gtest(test_low_level_safety test/test_low_level_safety.cpp)
+    target_include_directories(test_low_level_safety PRIVATE
+            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")
 endif ()
 
 ament_export_dependencies(${dependencies})
