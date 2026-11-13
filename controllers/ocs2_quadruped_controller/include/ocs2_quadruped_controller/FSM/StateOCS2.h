@@ -39,6 +39,8 @@ namespace ocs2::legged_robot
         FSMStateName checkChange() override;
 
     private:
+        /// Command written while no MPC policy is available.
+        void writeHoldCommand() const;
 
         std::shared_ptr<CtrlComponent> ctrl_component_;
         std::shared_ptr<rclcpp_lifecycle::LifecycleNode> node_;

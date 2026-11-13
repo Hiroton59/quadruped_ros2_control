@@ -63,7 +63,23 @@ namespace ocs2::legged_robot
     void StateOCS2::enter()
     {
         safety_checker_->reset();
+        // init() blocks the control loop until the first MPC policy arrives (15-40 ms measured in MuJoCo).
         ctrl_component_->init();
+        // Write a command in this cycle so the hardware command watchdog sees it right after the stall.
+        writeHoldCommand();
+    }
+
+    void StateOCS2::writeHoldCommand() const
+    {
+        // Same as StatePassive (the only state this one is entered from): zero torque, kd = 1.
+        for (int i = 0; i < 12; i++)
+        {
+            ctrl_interfaces_.joint_torque_command_interface_[i].get().set_value(0);
+            ctrl_interfaces_.joint_position_command_interface_[i].get().set_value(0);
+            ctrl_interfaces_.joint_velocity_command_interface_[i].get().set_value(0);
+            ctrl_interfaces_.joint_kp_command_interface_[i].get().set_value(0);
+            ctrl_interfaces_.joint_kd_command_interface_[i].get().set_value(1);
+        }
     }
 
     void StateOCS2::run(const rclcpp::Time& /**time**/,
@@ -71,6 +87,8 @@ namespace ocs2::legged_robot
     {
         if (ctrl_component_->mpc_running_ == false)
         {
+            // keep writing every cycle (hardware command watchdog)
+            writeHoldCommand();
             return;
         }
 
