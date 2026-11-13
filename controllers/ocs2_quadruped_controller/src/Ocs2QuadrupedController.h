@@ -100,6 +100,12 @@ namespace ocs2::legged_robot {
         std::string odom_name_;
         std::vector<std::string> odom_interface_types_;
 
+        // Hardware low-level safety stop (e.g. "safety/stop" from hardware_unitree_mujoco).
+        // Empty = not used. When it reads 1, the FSM is forced to PASSIVE.
+        std::string hardware_safety_interface_;
+        const hardware_interface::LoanedStateInterface* hardware_safety_stop_ = nullptr;
+        bool hardware_stop_reported_ = false;
+
         rclcpp::Subscription<control_input_msgs::msg::Inputs>::SharedPtr control_input_subscription_;
     };
 }

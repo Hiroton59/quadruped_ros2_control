@@ -68,6 +68,10 @@ namespace ocs2::legged_robot
         {
             conf.names.push_back(foot_force_name_ + "/" += interface_type);
         }
+        if (!hardware_safety_interface_.empty())
+        {
+            conf.names.push_back(hardware_safety_interface_);
+        }
 
         return conf;
     }
@@ -77,10 +81,26 @@ namespace ocs2::legged_robot
     {
         ctrl_comp_->updateState(time, period);
 
+        // The hardware latched a safety stop (it is already sending damping): go to PASSIVE and stay there.
+        const bool hardware_stopped = hardware_safety_stop_ != nullptr && hardware_safety_stop_->get_value() > 0.5;
+        if (hardware_stopped && !hardware_stop_reported_)
+        {
+            hardware_stop_reported_ = true;
+            RCLCPP_ERROR(get_node()->get_logger(),
+                         "Hardware safety stop (%s) is active: staying in passive until the hardware is restarted.",
+                         hardware_safety_interface_.c_str());
+        }
+        if (hardware_stopped && mode_ == FSMMode::NORMAL && current_state_ != state_list_.passive)
+        {
+            next_state_name_ = FSMStateName::PASSIVE;
+            next_state_ = state_list_.passive;
+            mode_ = FSMMode::CHANGE;
+        }
+
         if (mode_ == FSMMode::NORMAL)
         {
             current_state_->run(time, period);
-            next_state_name_ = current_state_->checkChange();
+            next_state_name_ = hardware_stopped ? current_state_->state_name : current_state_->checkChange();
             if (next_state_name_ != current_state_->state_name)
             {
                 mode_ = FSMMode::CHANGE;
@@ -125,6 +145,9 @@ namespace ocs2::legged_robot
             odom_name_ = auto_declare<std::string>("odom_name", odom_name_);
             odom_interface_types_ = auto_declare<std::vector<std::string>>("odom_interfaces", state_interface_types_);
         }
+        // Hardware safety stop state interface (optional)
+        hardware_safety_interface_ = auto_declare<std::string>("hardware_safety_interface", hardware_safety_interface_);
+
         // Foot Force Sensor
         foot_force_name_ = auto_declare<std::string>("foot_force_name", foot_force_name_);
         foot_force_interface_types_ =
@@ -177,9 +200,15 @@ namespace ocs2::legged_robot
         }
 
         // assign state interfaces
+        hardware_safety_stop_ = nullptr;
+        hardware_stop_reported_ = false;
         for (auto& interface : state_interfaces_)
         {
-            if (interface.get_prefix_name() == imu_name_)
+            if (!hardware_safety_interface_.empty() && interface.get_name() == hardware_safety_interface_)
+            {
+                hardware_safety_stop_ = &interface;
+            }
+            else if (interface.get_prefix_name() == imu_name_)
             {
                 ctrl_interfaces_.imu_state_interface_.emplace_back(interface);
             }
@@ -209,6 +238,7 @@ namespace ocs2::legged_robot
     controller_interface::CallbackReturn Ocs2QuadrupedController::on_deactivate(
         const rclcpp_lifecycle::State& /*previous_state*/)
     {
+        hardware_safety_stop_ = nullptr;
         release_interfaces();
         return CallbackReturn::SUCCESS;
     }

@@ -157,6 +157,15 @@ ocs2_quadruped_controller:
       - velocity.y
       - velocity.z
 
+    # Early failure detection in the OCS2 state (SafetyChecker) -> PASSIVE
+    safety:
+      max_roll_deg: 45.0
+      max_pitch_deg: 45.0
+      min_base_height: 0.15    # [m] estimated base z, checked after it once exceeded base_height_arm
+      base_height_arm: 0.20    # [m]
+    # Latched stop of hardware_unitree_mujoco (LowLevelSafety) -> PASSIVE. "" to disable
+    hardware_safety_interface: "safety/stop"
+
 rl_quadruped_controller:
   ros__parameters:
     update_rate: 200  # Hz

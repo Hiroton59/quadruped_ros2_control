@@ -38,12 +38,31 @@ namespace ocs2::legged_robot
                                              *ctrl_component_->ee_kinematics_);
         wbc_->loadTasksSetting(ctrl_component_->task_file_, ctrl_component_->verbose_);
 
-        // Safety Checker
-        safety_checker_ = std::make_shared<SafetyChecker>(ctrl_component_->legged_interface_->getCentroidalModelInfo());
+        // Safety Checker (parameters: safety.* in robot_control.yaml)
+        SafetyChecker::Params safety_params;
+        auto declare = [this](const std::string& name, const double default_value)
+        {
+            if (!node_->has_parameter(name))
+            {
+                node_->declare_parameter(name, default_value);
+            }
+            return node_->get_parameter(name).as_double();
+        };
+        safety_params.max_roll = declare("safety.max_roll_deg", 45.0) * M_PI / 180.0;
+        safety_params.max_pitch = declare("safety.max_pitch_deg", 45.0) * M_PI / 180.0;
+        safety_params.min_base_height = declare("safety.min_base_height", safety_params.min_base_height);
+        safety_params.base_height_arm = declare("safety.base_height_arm", safety_params.base_height_arm);
+        RCLCPP_INFO(node_->get_logger(),
+                    "SafetyChecker: |roll| <= %.1f deg, |pitch| <= %.1f deg, base z >= %.3f m (armed above %.3f m)",
+                    safety_params.max_roll * 180.0 / M_PI, safety_params.max_pitch * 180.0 / M_PI,
+                    safety_params.min_base_height, safety_params.base_height_arm);
+        safety_checker_ = std::make_shared<SafetyChecker>(ctrl_component_->legged_interface_->getCentroidalModelInfo(),
+                                                          safety_params);
     }
 
     void StateOCS2::enter()
     {
+        safety_checker_->reset();
         ctrl_component_->init();
     }
 
