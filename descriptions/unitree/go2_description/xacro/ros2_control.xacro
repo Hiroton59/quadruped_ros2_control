@@ -11,27 +11,25 @@
 
 			<!-- Low-level safety (hardware_unitree_mujoco/LowLevelSafety.h). See the package README. -->
 			<param name="safety_enabled">true</param>
-			<!-- Joint limits of the official Unitree Go2 URDF (unitreerobotics/unitree_ros
-			     robots/go2_description/urdf/go2_description.urdf, same as unitree_mujoco go2.xml).
-			     Not taken from const.xacro: its torque/velocity limits (calf 35.55 Nm, 20.06 rad/s)
-			     are the Go1 values and it has no separate rear thigh range.
-			     effective torque limit = *_torque_max * torque_limit_scale.
+			<!-- Joint limits from const.xacro (official Unitree Go2 URDF values).
+			     effective torque limit = *_torque_max * torque_limit_scale
+			     (keep config/ocs2/task.info torqueLimitsTask equal to it).
 			     "front_" / "rear_" prefixed names override a value for FR, FL / RR, RL. -->
 			<param name="torque_limit_scale">0.7</param>
-			<param name="hip_torque_max">23.7</param>
-			<param name="thigh_torque_max">23.7</param>
-			<param name="calf_torque_max">45.43</param>
-			<param name="hip_velocity_max">30.1</param>
-			<param name="thigh_velocity_max">30.1</param>
-			<param name="calf_velocity_max">15.70</param>
-			<param name="hip_position_min">-1.0472</param>
-			<param name="hip_position_max">1.0472</param>
-			<param name="front_thigh_position_min">-1.5708</param>
-			<param name="front_thigh_position_max">3.4907</param>
-			<param name="rear_thigh_position_min">-0.5236</param>
-			<param name="rear_thigh_position_max">4.5379</param>
-			<param name="calf_position_min">-2.7227</param>
-			<param name="calf_position_max">-0.83776</param>
+			<param name="hip_torque_max">${hip_torque_max}</param>
+			<param name="thigh_torque_max">${thigh_torque_max}</param>
+			<param name="calf_torque_max">${calf_torque_max}</param>
+			<param name="hip_velocity_max">${hip_velocity_max}</param>
+			<param name="thigh_velocity_max">${thigh_velocity_max}</param>
+			<param name="calf_velocity_max">${calf_velocity_max}</param>
+			<param name="hip_position_min">${hip_position_min}</param>
+			<param name="hip_position_max">${hip_position_max}</param>
+			<param name="front_thigh_position_min">${thigh_position_min}</param>
+			<param name="front_thigh_position_max">${thigh_position_max}</param>
+			<param name="rear_thigh_position_min">${rear_thigh_position_min}</param>
+			<param name="rear_thigh_position_max">${rear_thigh_position_max}</param>
+			<param name="calf_position_min">${calf_position_min}</param>
+			<param name="calf_position_max">${calf_position_max}</param>
 			<!-- command limits -->
 			<param name="position_command_margin">0.05</param>  <!-- rad, q_cmd kept this far inside the range -->
 			<param name="kp_max">200.0</param>

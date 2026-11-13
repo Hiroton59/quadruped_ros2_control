@@ -74,8 +74,14 @@
       <child link="${name}_thigh"/>
       <axis xyz="0 1 0"/>
       <dynamics damping="${damping}" friction="${friction}"/>
-      <limit effort="${thigh_torque_max}" velocity="${thigh_velocity_max}" lower="${thigh_position_min}"
-             upper="${thigh_position_max}"/>
+      <xacro:if value="${front_hind_dae == True}">
+        <limit effort="${thigh_torque_max}" velocity="${thigh_velocity_max}" lower="${thigh_position_min}"
+               upper="${thigh_position_max}"/>
+      </xacro:if>
+      <xacro:if value="${front_hind_dae == False}">
+        <limit effort="${thigh_torque_max}" velocity="${thigh_velocity_max}" lower="${rear_thigh_position_min}"
+               upper="${rear_thigh_position_max}"/>
+      </xacro:if>
     </joint>
 
 

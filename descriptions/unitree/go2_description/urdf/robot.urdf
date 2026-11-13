@@ -391,7 +391,7 @@
     <parent link="FL_thigh"/>
     <child link="FL_calf"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="35.55" velocity="20.06" lower="-2.7227" upper="-0.83776"/>
+    <limit effort="45.43" velocity="15.70" lower="-2.7227" upper="-0.83776"/>
   </joint>
   <joint name="FL_foot_fixed" type="fixed">
     <origin xyz="0 0 -0.213" rpy="0 -0 0"/>
@@ -421,7 +421,7 @@
     <parent link="FR_thigh"/>
     <child link="FR_calf"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="35.55" velocity="20.06" lower="-2.7227" upper="-0.83776"/>
+    <limit effort="45.43" velocity="15.70" lower="-2.7227" upper="-0.83776"/>
   </joint>
   <joint name="FR_foot_fixed" type="fixed">
     <origin xyz="0 0 -0.213" rpy="0 -0 0"/>
@@ -451,7 +451,7 @@
     <parent link="RL_thigh"/>
     <child link="RL_calf"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="35.55" velocity="20.06" lower="-2.7227" upper="-0.83776"/>
+    <limit effort="45.43" velocity="15.70" lower="-2.7227" upper="-0.83776"/>
   </joint>
   <joint name="RL_foot_fixed" type="fixed">
     <origin xyz="0 0 -0.213" rpy="0 -0 0"/>
@@ -473,7 +473,7 @@
     <parent link="RL_hip"/>
     <child link="RL_thigh"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="23.7" velocity="30.1" lower="-1.5708" upper="3.4907"/>
+    <limit effort="23.7" velocity="30.1" lower="-0.5236" upper="4.5379"/>
   </joint>
   <joint name="RR_calf_joint" type="revolute">
     <origin xyz="0 0 -0.213" rpy="0 -0 0"/>
@@ -481,7 +481,7 @@
     <parent link="RR_thigh"/>
     <child link="RR_calf"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="35.55" velocity="20.06" lower="-2.7227" upper="-0.83776"/>
+    <limit effort="45.43" velocity="15.70" lower="-2.7227" upper="-0.83776"/>
   </joint>
   <joint name="RR_foot_fixed" type="fixed">
     <origin xyz="0 0 -0.213" rpy="0 -0 0"/>
@@ -503,7 +503,7 @@
     <parent link="RR_hip"/>
     <child link="RR_thigh"/>
     <dynamics damping="0" friction="0"/>
-    <limit effort="23.7" velocity="30.1" lower="-1.5708" upper="3.4907"/>
+    <limit effort="23.7" velocity="30.1" lower="-0.5236" upper="4.5379"/>
   </joint>
   <joint name="floating_base" type="fixed">
     <origin xyz="0 0 0" rpy="0 -0 0"/>
