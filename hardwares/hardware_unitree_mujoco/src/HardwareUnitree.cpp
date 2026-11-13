@@ -23,10 +23,20 @@ using hardware_unitree_mujoco::JointCommand;
 using hardware_unitree_mujoco::JointStateSample;
 using hardware_unitree_mujoco::kNumJoints;
 using hardware_unitree_mujoco::SafetyParams;
+using hardware_unitree_mujoco::StopReason;
 
 namespace
 {
     const rclcpp::Logger kLogger = rclcpp::get_logger("unitree_hardware");
+}
+
+HardwareUnitree::~HardwareUnitree()
+{
+    stall_monitor_running_ = false;
+    if (stall_monitor_.joinable())
+    {
+        stall_monitor_.join();
+    }
 }
 
 double HardwareUnitree::steadyNow()
@@ -303,12 +313,25 @@ return_type HardwareUnitree::write(const rclcpp::Time& /*time*/, const rclcpp::D
 
     JointCommand cmd = held_command_;
     const double now = steadyNow();
-    safety_.filterCommand(cmd, fresh, now);
+    {
+        std::lock_guard<std::mutex> lock(cmd_mutex_);
+        last_write_time_ = now;
+        if (loop_stalled_)
+        {
+            safety_.externalStop(StopReason::LOOP_STALL, loop_stall_duration_, safety_.params().loop_stall_timeout,
+                                 now);
+        }
+        safety_.filterCommand(cmd, fresh, now);
+        publishLowCmd(cmd);
+    }
     safety_stop_state_ = safety_.stopped() ? 1.0 : 0.0;
     safety_reason_state_ = static_cast<double>(safety_.stopInfo().reason);
     reportSafetyEvents();
+    return return_type::OK;
+}
 
-    // send command
+void HardwareUnitree::publishLowCmd(const JointCommand& cmd)
+{
     for (size_t i = 0; i < kNumJoints; ++i)
     {
         low_cmd_.motor_cmd()[i].mode() = 0x01;
@@ -322,7 +345,89 @@ return_type HardwareUnitree::write(const rclcpp::Time& /*time*/, const rclcpp::D
     low_cmd_.crc() = crc32_core(reinterpret_cast<uint32_t*>(&low_cmd_),
                                 (sizeof(unitree_go::msg::dds_::LowCmd_) >> 2) - 1);
     low_cmd_publisher_->Write(low_cmd_);
-    return return_type::OK;
+}
+
+rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn HardwareUnitree::on_activate(
+    const rclcpp_lifecycle::State& /*previous_state*/)
+{
+    if (safety_.params().enabled && !stall_monitor_.joinable())
+    {
+        last_write_time_ = 0.0; // armed by the first write()
+        stall_monitor_running_ = true;
+        stall_monitor_ = std::thread(&HardwareUnitree::stallMonitorLoop, this);
+    }
+    return CallbackReturn::SUCCESS;
+}
+
+rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn HardwareUnitree::on_deactivate(
+    const rclcpp_lifecycle::State& /*previous_state*/)
+{
+    publishDampingOnExit("deactivate");
+    return CallbackReturn::SUCCESS;
+}
+
+rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn HardwareUnitree::on_shutdown(
+    const rclcpp_lifecycle::State& /*previous_state*/)
+{
+    publishDampingOnExit("shutdown");
+    return CallbackReturn::SUCCESS;
+}
+
+void HardwareUnitree::publishDampingOnExit(const char* reason)
+{
+    if (!safety_.params().enabled || !low_cmd_publisher_)
+    {
+        return;
+    }
+    // The stall monitor would not get the chance: the process may exit right after this.
+    stall_monitor_running_ = false;
+    if (stall_monitor_.joinable())
+    {
+        stall_monitor_.join();
+    }
+    std::lock_guard<std::mutex> lock(cmd_mutex_);
+    JointCommand damping;
+    safety_.setDamping(damping);
+    // Publish a few times in case one sample is lost.
+    for (int k = 0; k < 5; ++k)
+    {
+        publishLowCmd(damping);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    RCLCPP_WARN(kLogger, "[LowLevelSafety] hardware %s: published damping (kd=%.2f)", reason,
+                safety_.params().damping_kd);
+}
+
+void HardwareUnitree::stallMonitorLoop()
+{
+    // safety_.params() is constant after on_init, so reading it here is safe.
+    const double timeout = safety_.params().loop_stall_timeout;
+    while (stall_monitor_running_)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (last_write_time_ <= 0.0 || steadyNow() - last_write_time_ <= timeout)
+        {
+            continue;
+        }
+        std::lock_guard<std::mutex> lock(cmd_mutex_);
+        const double gap = steadyNow() - last_write_time_;
+        if (gap <= timeout)
+        {
+            continue; // write() ran meanwhile
+        }
+        if (!loop_stalled_)
+        {
+            loop_stall_duration_ = gap;
+            loop_stalled_ = true;
+            RCLCPP_ERROR(kLogger,
+                         "[LowLevelSafety] SAFETY STOP (latched): control loop stall, write() not called for %.3f s "
+                         "(limit %.3f s). Publishing damping from the monitor thread. "
+                         "(Expected when ros2_control_node is shutting down.)", gap, timeout);
+        }
+        JointCommand damping;
+        safety_.setDamping(damping);
+        publishLowCmd(damping);
+    }
 }
 
 void HardwareUnitree::initLowCmd()
@@ -448,6 +553,7 @@ bool HardwareUnitree::loadSafetyParams(const hardware_interface::HardwareInfo& i
     get_double("temperature_stop", p.temperature_stop);
     get_double("command_timeout", p.command_timeout);
     get_double("lowstate_timeout", p.state_timeout);
+    get_double("loop_stall_timeout", p.loop_stall_timeout);
 
     // estop_buttons: button names joined by '+', e.g. "L2+B"; "none" disables.
     if (const auto it = hw.find("estop_buttons"); it != hw.end())
@@ -483,7 +589,9 @@ bool HardwareUnitree::loadSafetyParams(const hardware_interface::HardwareInfo& i
     // sanity checks
     if (p.torque_limit_scale <= 0.0 || p.torque_limit_scale > 1.0) bad += " torque_limit_scale (0, 1]";
     if (p.damping_kd < 0.0 || p.damping_kd > p.kd_max) bad += " damping_kd [0, kd_max]";
-    if (p.command_timeout <= 0.0 || p.state_timeout <= 0.0 || p.tau_est_duration < 0.0) bad += " timeouts > 0";
+    if (p.command_timeout <= 0.0 || p.state_timeout <= 0.0 || p.loop_stall_timeout <= 0.0 ||
+        p.tau_est_duration < 0.0)
+        bad += " timeouts > 0";
     if (p.temperature_warn > p.temperature_stop) bad += " temperature_warn <= temperature_stop";
     for (size_t i = 0; i < kNumJoints; ++i)
     {
@@ -505,12 +613,12 @@ bool HardwareUnitree::loadSafetyParams(const hardware_interface::HardwareInfo& i
     RCLCPP_INFO(kLogger,
                 "[LowLevelSafety] torque limit (scale %.2f) hip %.2f thigh %.2f calf %.2f Nm | kp<=%.1f kd<=%.1f "
                 "| q_cmd margin %.3f rad, q tolerance %.3f rad | dq <= %.0f%% | tau_est > %.0f%% for %.3f s "
-                "| temp warn %.0f stop %.0f | cmd timeout %.3f s, lowstate timeout %.3f s | estop mask 0x%04x "
-                "| damping kd %.2f",
+                "| temp warn %.0f stop %.0f | cmd timeout %.3f s, lowstate timeout %.3f s, loop stall %.3f s "
+                "| estop mask 0x%04x | damping kd %.2f",
                 p.torque_limit_scale, safety_.torqueLimit(0), safety_.torqueLimit(1), safety_.torqueLimit(2),
                 p.kp_max, p.kd_max, p.q_cmd_margin, p.q_monitor_tolerance, p.dq_ratio * 100.0,
                 p.tau_est_ratio * 100.0, p.tau_est_duration, p.temperature_warn, p.temperature_stop,
-                p.command_timeout, p.state_timeout, p.estop_buttons, p.damping_kd);
+                p.command_timeout, p.state_timeout, p.loop_stall_timeout, p.estop_buttons, p.damping_kd);
     return true;
 }
 

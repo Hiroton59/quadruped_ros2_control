@@ -362,6 +362,15 @@ TEST_F(Fixture, StopIsLatched)
     EXPECT_FALSE(safety.takeStopEvent());
 }
 
+TEST_F(Fixture, ExternalStopLatches)
+{
+    safety.externalStop(StopReason::LOOP_STALL, 0.15, 0.1, t);
+    const JointCommand out = step(nominalState(), nominalCommand());
+    EXPECT_TRUE(safety.stopped());
+    EXPECT_EQ(safety.stopInfo().reason, StopReason::LOOP_STALL);
+    EXPECT_TRUE(isDamping(out, safety.params().damping_kd));
+}
+
 TEST(Disabled, PassesEverything)
 {
     auto p = SafetyParams::go2Defaults();

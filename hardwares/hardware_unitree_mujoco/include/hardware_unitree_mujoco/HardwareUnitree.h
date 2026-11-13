@@ -7,8 +7,10 @@
 #define HARDWAREUNITREE_H
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <thread>
 
 #include "hardware_interface/system_interface.hpp"
 #include "hardware_unitree_mujoco/LowLevelSafety.h"
@@ -21,6 +23,8 @@
 
 class HardwareUnitree final : public hardware_interface::SystemInterface {
 public:
+    ~HardwareUnitree() override;
+
     CallbackReturn on_init(const hardware_interface::HardwareInfo &info) override;
 
     std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
@@ -30,6 +34,15 @@ public:
     hardware_interface::return_type read(const rclcpp::Time &time, const rclcpp::Duration &period) override;
 
     hardware_interface::return_type write(const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/) override;
+
+    /// on_activate starts the loop stall monitor.
+    /// Leaving the active state (deactivate / shutdown): stop sending controller commands and
+    /// publish damping, so the motors are not left with the last controller command.
+    CallbackReturn on_activate(const rclcpp_lifecycle::State &previous_state) override;
+
+    CallbackReturn on_deactivate(const rclcpp_lifecycle::State &previous_state) override;
+
+    CallbackReturn on_shutdown(const rclcpp_lifecycle::State &previous_state) override;
 
 protected:
     // Command interface buffers. Reset to the watchdog sentinel after every write()
@@ -64,6 +77,15 @@ protected:
 
     void reportSafetyEvents();
 
+    /// Fill low_cmd_ from cmd, add the CRC and publish. Caller holds cmd_mutex_.
+    void publishLowCmd(const hardware_unitree_mujoco::JointCommand& cmd);
+
+    /// Thread: if write() is not called for loop_stall_timeout (control loop stuck, e.g. in a
+    /// controller's update()), publish damping itself and latch the stop.
+    void stallMonitorLoop();
+
+    void publishDampingOnExit(const char* reason);
+
     static double steadyNow();
 
     void lowStateMessageHandle(const void *messages);
@@ -90,6 +112,14 @@ protected:
     double safety_reason_state_ = 0.0; // state interface safety/reason (StopReason code)
     std::uint64_t last_clamp_count_ = 0;
     double last_clamp_report_time_ = 0.0;
+
+    // Loop stall monitor
+    std::mutex cmd_mutex_; // guards low_cmd_ and its publication (write() vs stall monitor)
+    std::thread stall_monitor_;
+    std::atomic<bool> stall_monitor_running_{false};
+    std::atomic<double> last_write_time_{0.0}; // [s] steady clock, 0 = write() not called yet
+    std::atomic<bool> loop_stalled_{false};
+    double loop_stall_duration_ = 0.0; // guarded by cmd_mutex_
 
     std::string network_interface_ = "lo";
     int domain_ = 1;

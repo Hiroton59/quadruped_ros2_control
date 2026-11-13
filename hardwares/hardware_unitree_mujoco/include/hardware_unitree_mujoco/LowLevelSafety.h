@@ -143,6 +143,7 @@ namespace hardware_unitree_mujoco
 
         double command_timeout = 0.02; ///< [s] watchdog
         double state_timeout = 0.05; ///< [s] LowState not received
+        double loop_stall_timeout = 0.1; ///< [s] write() not called (checked by HardwareUnitree's thread)
 
         std::uint16_t estop_buttons = remote::L2 | remote::B; ///< 0 disables the remote e-stop
 
@@ -193,6 +194,7 @@ namespace hardware_unitree_mujoco
         COMMAND_TIMEOUT = 7,
         STATE_TIMEOUT = 8,
         REMOTE_ESTOP = 9,
+        LOOP_STALL = 10, ///< write() not called (detected by the hardware's monitor thread)
     };
 
     inline const char* toString(const StopReason r)
@@ -209,6 +211,7 @@ namespace hardware_unitree_mujoco
         case StopReason::COMMAND_TIMEOUT: return "command watchdog timeout";
         case StopReason::STATE_TIMEOUT: return "LowState timeout";
         case StopReason::REMOTE_ESTOP: return "remote controller e-stop";
+        case StopReason::LOOP_STALL: return "control loop stall (write() not called)";
         }
         return "unknown";
     }
@@ -402,6 +405,13 @@ namespace hardware_unitree_mujoco
                     ++torque_clamp_count_;
                 }
             }
+        }
+
+        /// Stop detected outside this class (e.g. loop stall). Latches like any other stop.
+        void externalStop(const StopReason reason, const double value, const double limit, const double now)
+        {
+            if (!p_.enabled) return;
+            trip(reason, -1, value, limit, now);
         }
 
         /// Total motor torque the command would produce with the latest measured state.

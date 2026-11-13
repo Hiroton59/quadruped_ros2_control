@@ -38,6 +38,7 @@
 			<param name="temperature_stop">85</param>
 			<param name="command_timeout">0.02</param>     <!-- s, no command interface written -->
 			<param name="lowstate_timeout">0.05</param>    <!-- s, no rt/lowstate received -->
+			<param name="loop_stall_timeout">0.1</param>   <!-- s, write() not called (control loop stuck); > the OCS2 entry stall -->
 			<param name="estop_buttons">L2+B</param>       <!-- wireless_remote buttons joined by '+', or none -->
 			<param name="damping_kd">3.0</param>
 		</hardware>
