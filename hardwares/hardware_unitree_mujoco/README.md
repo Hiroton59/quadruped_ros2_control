@@ -55,3 +55,131 @@ After modified the config, you can tried to visualize the robot info from real r
 source ~/ros2_ws/install/setup.bash
 ros2 launch hardware_unitree_mujoco visualize.launch.py
 ```
+## 4. Low-level safety（ローレベル安全対策）
+
+`include/hardware_unitree_mujoco/LowLevelSafety.h`（ROS に依存しないヘッダのみのクラス）を
+`read()` / `write()` から毎周期呼ぶ．動的メモリ確保と例外は使わない．コントローラに依存しないので，
+ocs2 / unitree_guide / rl のどのコントローラでも同じように効く．
+
+### 4.1 毎周期の指令の制限（write()）
+
+1. q, dq, kp, kd, tau のどれかが有限でない → 停止（ダンピング，ラッチ）
+2. kp を [0, kp_max]，kd を [0, kd_max] に制限
+3. q_cmd を [q_min + position_command_margin, q_max − position_command_margin] に制限
+4. モータが出すトルクの合計 `tau + kp (q_cmd − q) + kd (dq_cmd − dq)` を ±(torque_max × torque_limit_scale) に
+   収まるように tau を変える（q, dq は最新の LowState）．何回制限したかを 5 s ごとに INFO で出す
+
+### 4.2 状態の監視（異常ならダンピングにしてラッチ）
+
+| 監視 | 条件 |
+|---|---|
+| 実測トルク | \|tau_est\| > tau_est_ratio × 有効トルク上限 が tau_est_duration 続いた |
+| 関節角 | q < q_min − position_monitor_tolerance または q > q_max + position_monitor_tolerance |
+| 関節角速度 | \|dq\| > velocity_ratio × velocity_max |
+| モータ温度 | temperature ≥ temperature_warn で WARN（関節ごとに 1 回），≥ temperature_stop で停止 |
+| 指令のウォッチドッグ | command_timeout の間，どの command interface も書かれなかった（最初の指令の後から有効） |
+| LowState | lowstate_timeout の間 rt/lowstate を受信しない（最初の受信の後から有効） |
+| リモコン | wireless_remote のボタンが estop_buttons をすべて含む（既定 L2 + B） |
+| 制御ループの停止 | loop_stall_timeout の間 write() が呼ばれない（別スレッドで監視し，そのスレッドからダンピングを送る） |
+| 状態の非有限値 | LowState の q, dq, tau_est が NaN / Inf |
+
+- **ダンピング**：全関節 tau = 0, kp = 0, kd = damping_kd, q = dq = 0．一度止まると自動では戻らない．
+  解除は ros2_control_node の再起動のみ．
+- 止めた理由（どの関節の何が，いくつで，しきい値はいくつか）を 1 回だけ `RCLCPP_ERROR` で出す．
+- 最初の LowState を受信するまでは，ラッチせずにダンピングを送る（コントローラが 0 の状態で計算した指令を送らない）．
+- ハードウェアの deactivate / shutdown のときもダンピングを送る．
+
+### 4.3 ウォッチドッグの仕組み
+
+`write()` の最後に，command interface のバッファを特別な NaN（payload が `0x7ff85afec0de0001`）で埋める．
+次の `write()` でこの値のままのバッファは「この周期にコントローラが書かなかった」と判定し，前回の値を使う
+（500 Hz のコントローラを 1 kHz の controller_manager で動かしても問題ない）．コントローラが計算で作った NaN は
+payload が違うので，非有限の指令として検出される．
+
+そのため **コントローラは update() のたびに少なくとも 1 つの command interface を書く必要がある**．
+controller_common の StatePassive と ocs2 の StateOCS2（MPC の起動前）は，このために毎周期書くように変更した．
+
+### 4.4 安全停止の状態
+
+state interface `safety/stop`（1 = 停止中）と `safety/reason`（理由のコード）を出す．
+
+- joint_state_broadcaster が `/dynamic_joint_states` に出すので，`ros2 topic echo /dynamic_joint_states` で見える．
+- ocs2_quadruped_controller は `hardware_safety_interface: "safety/stop"`（robot_control.yaml）で読み，
+  停止中は PASSIVE に移ってそこに留まる．
+
+reason のコード：0 なし，1 指令が非有限，2 状態が非有限，3 tau_est の持続超過，4 関節角が範囲外，
+5 関節角速度，6 モータ温度，7 指令のウォッチドッグ，8 LowState のタイムアウト，9 リモコンの非常停止，10 制御ループの停止
+
+### 4.5 パラメータ
+
+ros2_control.xacro の `<hardware>` の `<param>` で設定する（go2_description では関節の上限を const.xacro から取る）．
+書かなかったパラメータは下の既定値（Go2）になる．
+
+| パラメータ | 既定値 | 説明 |
+|---|---|---|
+| safety_enabled | true | false で安全対策を無効化（指令をそのまま送る） |
+| torque_limit_scale | 0.7 | 有効トルク上限 = *_torque_max × これ |
+| hip_torque_max / thigh_torque_max / calf_torque_max | 23.7 / 23.7 / 35.55 Nm | const.xacro |
+| hip_position_min, max | −1.0472, 1.0472 rad | const.xacro |
+| thigh_position_min, max | −1.5708, 3.4907 rad | const.xacro |
+| calf_position_min, max | −2.7227, −0.83776 rad | const.xacro |
+| hip_velocity_max / thigh_velocity_max / calf_velocity_max | 30.1 / 30.1 / 20.06 rad/s | const.xacro |
+| position_command_margin | 0.05 rad | q_cmd を可動域のこれだけ内側に制限 |
+| position_monitor_tolerance | 0.05 rad | 実測 q が可動域をこれだけ超えたら停止 |
+| kp_max / kd_max | 200 / 10 | |
+| velocity_ratio | 0.8 | |
+| tau_est_ratio / tau_est_duration | 0.9 / 0.2 s | |
+| temperature_warn / temperature_stop | 70 / 85 | MotorState_.temperature（単位は未確認，°C と仮定） |
+| command_timeout | 0.02 s | |
+| lowstate_timeout | 0.05 s | |
+| loop_stall_timeout | 0.1 s | OCS2 状態に入るときの初期方策待ち（制御ループを 15〜40 ms 止める）より長くする |
+| estop_buttons | L2+B | R1 L1 Start Select R2 L2 F1 F2 A B X Y up right down left を + でつなぐ．none で無効 |
+| damping_kd | 3.0 | |
+
+wireless_remote のバイト配置は unitree_sdk2 の `include/unitree/dds_wrapper/common/unitree_joystick.hpp`
+（`REMOTE_DATA_RX`）による：byte 0–1 head，byte 2–3 ボタン（uint16，bit 0 から R1, L1, Start, Select, R2, L2, f1, f2,
+A, B, X, Y, up, right, down, left）．
+
+### 4.6 単体テスト
+
+```bash
+cd ~/go2_mpc_ws
+colcon build --packages-select hardware_unitree_mujoco --symlink-install
+colcon test --packages-select hardware_unitree_mujoco --ctest-args -R test_low_level_safety
+colcon test-result --test-result-base build/hardware_unitree_mujoco
+# または直接： ./build/hardware_unitree_mujoco/test_low_level_safety
+```
+
+### 4.7 MuJoCo での確認手順
+
+各ターミナルで：
+
+```bash
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export LD_LIBRARY_PATH=/opt/openrobots/lib:/opt/unitree_robotics/lib:$LD_LIBRARY_PATH
+source ~/go2_mpc_ws/install/setup.bash
+```
+
+起動時のログに `[LowLevelSafety] torque limit (scale 0.70) hip 16.59 thigh 16.59 calf 24.88 Nm ...` が出ることを確認する．
+
+1. **通常の歩行で誤停止しないこと**
+   ```bash
+   # ターミナル 1
+   cd ~/unitree_mujoco/simulate/build && ./unitree_mujoco -r go2
+   # ターミナル 2
+   ros2 launch go2_stride_test stride_tracker_test.launch.py stride_length:=0.40
+   ```
+   `SAFETY STOP` が出ず，`go2_trajectory_tracker: stop: goal reached` まで進むこと．stride_length 0.80 でも確認する．
+   やり直す前に MuJoCo の Load key で初期姿勢に戻すか，unitree_mujoco を起動し直す．
+
+2. **コントローラを止めたときにウォッチドッグで停止すること**（1 の歩行中に）
+   ```bash
+   ros2 control switch_controllers --deactivate ocs2_quadruped_controller
+   ```
+   `SAFETY STOP ... command watchdog timeout: value 0.02xx, limit 0.0200` が出て，ダンピングになること．`ros2 topic echo --once /dynamic_joint_states` の `safety` が `stop: 1.0, reason: 7.0` になること．
+
+3. **ロボットを押し倒したときにコントローラ層の姿勢チェックで PASSIVE になること**（1 の歩行中か立っているときに）
+   MuJoCo のウィンドウでロボットの胴体をダブルクリックして選択し，Ctrl + 右ドラッグで横から力を加えて倒す．
+   `[SafetyChecker] Orientation safety check failed: roll ... deg` と `Switched from OCS2 State to passive` が出ること．
+   高さのチェックは `[SafetyChecker] Base height safety check failed` が出る．
+   しきい値は robot_control.yaml の `ocs2_quadruped_controller.safety.*`．
