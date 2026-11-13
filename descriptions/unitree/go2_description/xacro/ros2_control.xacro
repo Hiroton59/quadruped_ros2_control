@@ -8,6 +8,38 @@
 <!--			<param name="domain">0</param>-->
 <!--			<param name="network_interface">enp46s0</param>-->
 <!--			<param name="show_foot_force">true</param>-->
+
+			<!-- Low-level safety (hardware_unitree_mujoco/LowLevelSafety.h). See the package README. -->
+			<param name="safety_enabled">true</param>
+			<!-- joint limits from const.xacro; effective torque limit = *_torque_max * torque_limit_scale -->
+			<param name="torque_limit_scale">0.7</param>
+			<param name="hip_torque_max">${hip_torque_max}</param>
+			<param name="thigh_torque_max">${thigh_torque_max}</param>
+			<param name="calf_torque_max">${calf_torque_max}</param>
+			<param name="hip_position_min">${hip_position_min}</param>
+			<param name="hip_position_max">${hip_position_max}</param>
+			<param name="thigh_position_min">${thigh_position_min}</param>
+			<param name="thigh_position_max">${thigh_position_max}</param>
+			<param name="calf_position_min">${calf_position_min}</param>
+			<param name="calf_position_max">${calf_position_max}</param>
+			<param name="hip_velocity_max">${hip_velocity_max}</param>
+			<param name="thigh_velocity_max">${thigh_velocity_max}</param>
+			<param name="calf_velocity_max">${calf_velocity_max}</param>
+			<!-- command limits -->
+			<param name="position_command_margin">0.05</param>  <!-- rad, q_cmd kept this far inside the range -->
+			<param name="kp_max">200.0</param>
+			<param name="kd_max">10.0</param>
+			<!-- monitors (latched damping on failure) -->
+			<param name="position_monitor_tolerance">0.05</param>  <!-- rad, measured q may exceed the range this much -->
+			<param name="velocity_ratio">0.8</param>       <!-- of *_velocity_max -->
+			<param name="tau_est_ratio">0.9</param>        <!-- of the effective torque limit ... -->
+			<param name="tau_est_duration">0.2</param>     <!-- ... continuously for this long [s] -->
+			<param name="temperature_warn">70</param>      <!-- MotorState_.temperature -->
+			<param name="temperature_stop">85</param>
+			<param name="command_timeout">0.02</param>     <!-- s, no command interface written -->
+			<param name="lowstate_timeout">0.05</param>    <!-- s, no rt/lowstate received -->
+			<param name="estop_buttons">L2+B</param>       <!-- wireless_remote buttons joined by '+', or none -->
+			<param name="damping_kd">3.0</param>
 		</hardware>
 
 		<joint name="FR_hip_joint">
