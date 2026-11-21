@@ -165,6 +165,29 @@ ocs2_quadruped_controller:
       base_height_arm: 0.20    # [m]
     # Latched stop of hardware_unitree_mujoco (LowLevelSafety) -> PASSIVE. "" to disable
     hardware_safety_interface: "safety/stop"
+    # Lie down: command 15 in OCS2 -> joint PD from the current pose to down_pos in duration [s],
+    # hold [s], then PASSIVE. Command 1 still goes to PASSIVE at once.
+    # down_pos / kp / kd: same as unitree_guide_controller (down_pos, stand_kp, stand_kd), in the order of joints
+    # (FL, FR, RL, RR). The calf -2.8 rad is clamped by hardware_unitree_mujoco to its range (-2.7227 + 0.05).
+    lie_down:
+      command: 15
+      duration: 1.8
+      hold: 0.2
+      kp: 80.0
+      kd: 3.5
+      down_pos:
+        - 0.01
+        - 1.27
+        - -2.8
+        - -0.01
+        - 1.27
+        - -2.8
+        - 0.3
+        - 1.31
+        - -2.8
+        - -0.3
+        - 1.31
+        - -2.8
 
 rl_quadruped_controller:
   ros__parameters:
