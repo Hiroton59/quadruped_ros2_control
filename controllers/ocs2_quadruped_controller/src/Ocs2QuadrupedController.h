@@ -9,6 +9,7 @@
 #include <controller_interface/controller_interface.hpp>
 #include <control_input_msgs/msg/inputs.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <ocs2_quadruped_controller/FSM/StateLieDown.h>
 #include <ocs2_quadruped_controller/FSM/StateOCS2.h>
 #include <ocs2_quadruped_controller/control/CtrlComponent.h>
 
@@ -17,6 +18,7 @@ namespace ocs2::legged_robot {
         std::shared_ptr<FSMState> invalid;
         std::shared_ptr<StatePassive> passive;
         std::shared_ptr<StateOCS2> fixedDown;
+        std::shared_ptr<StateLieDown> lieDown; ///< nullptr when lie_down.down_pos is not set
     };
 
     class Ocs2QuadrupedController final : public controller_interface::ControllerInterface {

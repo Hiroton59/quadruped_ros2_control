@@ -46,6 +46,9 @@ namespace ocs2::legged_robot
             return failed;
         }
 
+        /// command that goes to LIEDOWN (0: lie down disabled)
+        void setLieDownCommand(const int command) { lie_down_command_ = command; }
+
     private:
         /// Command written while no MPC policy is available.
         void writeHoldCommand() const;
@@ -63,6 +66,7 @@ namespace ocs2::legged_robot
 
         vector_t optimized_state_, optimized_input_;
         bool safety_failed_ = false;
+        int lie_down_command_ = 0;
     };
 }
 

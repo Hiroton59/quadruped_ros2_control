@@ -200,11 +200,42 @@ namespace ocs2::legged_robot
         foot_force_interface_types_ =
             auto_declare<std::vector<std::string>>("foot_force_interfaces", state_interface_types_);
 
+        // Lie down from OCS2 (command lie_down.command): joint PD to lie_down.down_pos, then PASSIVE.
+        // Declared before CtrlComponent: GaitManager reads lie_down.command to ignore it.
+        StateLieDown::Params lie_down;
+        int lie_down_command = auto_declare<int>("lie_down.command", 15);
+        lie_down.down_pos = auto_declare<std::vector<double>>("lie_down.down_pos", lie_down.down_pos);
+        lie_down.kp = auto_declare<double>("lie_down.kp", lie_down.kp);
+        lie_down.kd = auto_declare<double>("lie_down.kd", lie_down.kd);
+        lie_down.duration = auto_declare<double>("lie_down.duration", lie_down.duration);
+        lie_down.hold = auto_declare<double>("lie_down.hold", lie_down.hold);
+
         ctrl_comp_ = std::make_shared<CtrlComponent>(get_node(), ctrl_interfaces_);
         ctrl_comp_->setupStateEstimate(estimator_type_);
 
         state_list_.passive = std::make_shared<StatePassive>(ctrl_interfaces_);
         state_list_.fixedDown = std::make_shared<StateOCS2>(ctrl_interfaces_, ctrl_comp_);
+
+        if (lie_down_command <= 2)
+        {
+            RCLCPP_WARN(get_node()->get_logger(), "lie_down.command %d is not allowed (1, 2 are FSM commands): "
+                        "lie down disabled", lie_down_command);
+        }
+        else if (lie_down.down_pos.size() != 12 || lie_down.duration <= 0.0 || lie_down.hold < 0.0 ||
+            lie_down.kp < 0.0 || lie_down.kd < 0.0)
+        {
+            RCLCPP_WARN(get_node()->get_logger(),
+                        "lie_down.down_pos (12 values) / duration / kp / kd not valid: lie down disabled "
+                        "(command 1 in OCS2 goes to PASSIVE directly)");
+        }
+        else
+        {
+            state_list_.lieDown = std::make_shared<StateLieDown>(ctrl_interfaces_, lie_down);
+            state_list_.fixedDown->setLieDownCommand(lie_down_command);
+            RCLCPP_INFO(get_node()->get_logger(),
+                        "Lie down: command %d in OCS2, %.2f s to down_pos (kp %.1f, kd %.2f), then PASSIVE",
+                        lie_down_command, lie_down.duration, lie_down.kp, lie_down.kd);
+        }
 
         return CallbackReturn::SUCCESS;
     }
@@ -324,6 +355,8 @@ namespace ocs2::legged_robot
             return state_list_.passive;
         case FSMStateName::FIXEDDOWN:
             return state_list_.fixedDown;
+        case FSMStateName::LIEDOWN:
+            return state_list_.lieDown;
         default:
             return state_list_.invalid;
         }

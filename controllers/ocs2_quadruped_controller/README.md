@@ -103,6 +103,11 @@ To config the path for the cppAD shared library, you can modify the `modelFolder
   * Keyboard 3: trot
   * Keyboard 4: standing_trot
   * Keyboard 5: flying_trot
+* Command 15 (`/control_input`, in OCS2 MPC Mode): lie down
+  * Joint PD from the current pose to `lie_down.down_pos` in `lie_down.duration` [s], hold `lie_down.hold` [s], then Passive Mode.
+  * Send command 2 (stance) first: in a swing gait a foot is still in the air when the PD starts.
+  * Command 1 during lie down: Passive Mode at once.
+  * Enabled only when `lie_down.down_pos` (12 values, in the order of `joints`) is set. The command number is `lie_down.command` (default 15); GaitManager ignores it. Parameters for Go2: `go2_description/config/robot_control.yaml`.
 
 ### 3.3 Launch Controller
 #### Mujoco Simulation

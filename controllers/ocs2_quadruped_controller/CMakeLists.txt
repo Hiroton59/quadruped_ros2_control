@@ -39,6 +39,7 @@ find_package(PCL REQUIRED COMPONENTS common)
 add_library(${PROJECT_NAME} SHARED
         src/Ocs2QuadrupedController.cpp
         src/FSM/StateOCS2.cpp
+        src/FSM/StateLieDown.cpp
 
         src/estimator/GroundTruth.cpp
         src/estimator/LinearKalmanFilter.cpp

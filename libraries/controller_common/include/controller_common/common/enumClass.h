@@ -19,7 +19,8 @@ enum class FSMStateName
     BALANCETEST,
 
     OCS2,
-    RL
+    RL,
+    LIEDOWN  // ocs2_quadruped_controller: lie down from OCS2 with joint PD, then PASSIVE
 };
 
 enum class FSMMode

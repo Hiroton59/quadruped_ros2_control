@@ -19,6 +19,11 @@ namespace ocs2::legged_robot
           node_(std::move(node)),
           target_gait_({0.0, 1.0}, {STANCE})
     {
+        // The lie down command (Ocs2QuadrupedController) is not a gait
+        if (node_->has_parameter("lie_down.command"))
+        {
+            lie_down_command_ = static_cast<int>(node_->get_parameter("lie_down.command").as_int());
+        }
         // 歩行周期 [s]．stance 以外の gait をこの周期に伸縮する（0 以下で gait.info のまま）
         period_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
             "/gait_period", rclcpp::QoS(1).reliable().transient_local(),
@@ -80,7 +85,7 @@ namespace ocs2::legged_robot
         bool changed = false;
 
         const int command = ctrl_interfaces_.control_inputs_.command;
-        if (command != 0 && command != last_command_)
+        if (command != 0 && command != lie_down_command_ && command != last_command_)
         {
             last_command_ = command;
             const size_t index = std::max(0, command - 2);

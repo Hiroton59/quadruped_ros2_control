@@ -148,7 +148,12 @@ namespace ocs2::legged_robot
             safety_failed_ = true;
             return FSMStateName::PASSIVE;
         }
-        switch (ctrl_interfaces_.control_inputs_.command)
+        const int command = ctrl_interfaces_.control_inputs_.command;
+        if (lie_down_command_ != 0 && command == lie_down_command_)
+        {
+            return FSMStateName::LIEDOWN;
+        }
+        switch (command)
         {
         case 1:
             return FSMStateName::PASSIVE;

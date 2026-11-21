@@ -43,6 +43,7 @@ namespace ocs2::legged_robot
 
         ModeSequenceTemplate target_gait_;
         int last_command_ = 0;
+        int lie_down_command_ = 0; // not a gait (Ocs2QuadrupedController lie down)
         size_t current_gait_index_ = 0;
         bool gait_updated_{false};
         bool verbose_{false};
